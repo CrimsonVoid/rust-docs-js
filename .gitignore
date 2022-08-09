@@ -1,3 +1,7 @@
+node_modules
+package-lock.json
+
+## yarn
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -9,3 +13,6 @@
 # Documentation here: https://yarnpkg.com/features/zero-installs
 # !.yarn/cache
 .pnp.*
+
+## prod & sensitive files
+build
