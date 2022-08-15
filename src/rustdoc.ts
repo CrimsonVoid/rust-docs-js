@@ -75,12 +75,10 @@ export type Deprecation = {
 
 export type Visibility =
   | { tag: 'Public' }
-  // For the most part items are private by default. The exceptions are associated items of
-  // public traits and variants of public enums.
-  | { tag: 'Default' }
+  | { tag: 'Default' } // private by default, except for `pub trait` items and `pub enum` variants
   | { tag: 'Crate' }
   // For `pub(in path)` visibility. `parent` is the module it's restricted to and `path` is how
-  // that module was referenced (like `"super::super"` or `"crate::foo::bar"`).
+  // that module was referenced (like `super::super` or `crate::foo::bar`).
   | { tag: 'Restricted'; parent: Id; path: string }
 
 // A trait and potential HRTBs
@@ -157,12 +155,10 @@ export type Module = {
 
 export type Import = {
   tag: 'Import'
-  source: string // full path being imported
-  // May be different from the last segment of `source` when renaming imports:
-  // `use source as name;`
-  name: string
-  id?: Id // ID of the item being imported, null in case of re-exports of primitives. eg. `pub use i32 as my_i32`
-  glob: boolean // does this import use a glob? eg. `use source::*`
+  source: string // full path being imported `std::io::Read`
+  name: string // last segment of source after renaming `use source as name`
+  id?: Id // ID of the item being imported, null in case of re-exports of primitives. `pub use i32 as my_i32`
+  glob: boolean // does this import use a glob? `use source::*`
 }
 
 export type Union = {
@@ -175,7 +171,7 @@ export type Union = {
 
 export type Struct = {
   tag: 'Struct'
-  struct_type: StructType
+  struct_type: 'plain' | 'tuple' | 'unit'
   generics: Generics
   fields_stripped: boolean
   fields: Id[]
@@ -234,7 +230,7 @@ export type AssocType = {
   tag: 'AssocType'
   generics: Generics
   bounds: GenericBound[]
-  default?: Type // e.g. `type X = usize;`
+  default?: Type // `type X = usize;`
 }
 
 // #[serde(tag = "kind", content = "inner", rename_all = "snake_case")]
@@ -258,17 +254,10 @@ export type ItemEnum =
   | { tag: 'Static'; type: Type; mutable: boolean; expr: string }
   | { tag: 'ForeignType' } // `type`s from an extern block
   | { tag: 'Macro'; val: string }
-  | { tag: 'ProcMacro'; kind: MacroKind; helpers: string[] }
+  | { tag: 'ProcMacro'; kind: 'bang' | 'attr' | 'derive'; helpers: string[] }
   | { tag: 'PrimitiveType'; val: string }
   | { tag: 'AssocConst'; type: Type; default?: string } // const X: usize = 5;
   | AssocType
-
-// #[serde(rename_all = "snake_case")]
-export enum StructType {
-  Plain,
-  Tuple,
-  Unit,
-}
 
 export type Header = {
   const: boolean
@@ -301,69 +290,46 @@ export type GenericParamDef = {
   kind:
     | { tag: 'Lifetime'; outlives: string[] }
     | { tag: 'Const'; type: Type; default?: string }
-    | GPDKType
-}
-
-export type GPDKType = {
-  tag: 'Type'
-  bounds: GenericBound[]
-  default?: Type
-  // This is normally `false`, which means that this generic parameter is
-  // declared in the Rust source text. If it is `true`, this generic parameter
-  // has been introduced by the compiler behind the scenes.
-  //
-  // For example, consider
-  //   pub fn f(_: impl Trait) {}
-  // The compiler will transform this behind the scenes to
-  //   pub fn f<impl Trait: Trait>(_: impl Trait) {}
-  //
-  // In this example, the generic parameter named `impl Trait` (and which
-  // is bound by `Trait`) is synthetic, because it was not originally in
-  // the Rust source text.
-  synthetic: boolean
-}
-
-export type WPBoundPredicate = {
-  tag: 'BoundPredicate'
-  type: Type
-  bounds: GenericBound[]
-  // where for<'a> &'a T: Iterator," - `for<...>` part in HRTBs
-  generic_params: GenericParamDef[]
-}
-
-export type WPRegionPredicate = {
-  tag: 'RegionPredicate'
-  lifetime: string
-  bounds: GenericBound[]
-}
-
-export type WPEqPredicate = {
-  tag: 'EqPredicate'
-  lhs: Type
-  rhs: Term
+    | {
+        tag: 'Type'
+        bounds: GenericBound[]
+        default?: Type
+        // This is normally `false`, which means that this generic parameter is
+        // declared in the Rust source text. If it is `true`, this generic parameter
+        // has been introduced by the compiler behind the scenes.
+        //
+        // For example, consider
+        //   pub fn f(_: impl Trait) {}
+        // The compiler will transform this behind the scenes to
+        //   pub fn f<impl Trait: Trait>(_: impl Trait) {}
+        //
+        // In this example, the generic parameter named `impl Trait` (and which
+        // is bound by `Trait`) is synthetic, because it was not originally in
+        // the Rust source text.
+        synthetic: boolean
+      }
 }
 
 // #[serde(rename_all = "snake_case")]
 export type WherePredicate =
-  | WPBoundPredicate
-  | WPRegionPredicate
-  | WPEqPredicate
-
-export type GBTraitBound = {
-  tag: 'TraitBound'
-  trait: Type
-  // where F: for<'a, 'b> Fn(&'a u8, &'b u8) - `for<...>` part in HRTBs
-  generic_params: GenericParamDef[]
-  modifier: 'none' | 'maybe' | 'maybe_const'
-}
-
-export type GBOutlives = {
-  tag: 'Outlives'
-  val: string
-}
+  | { tag: 'RegionPredicate'; lifetime: string; bounds: GenericBound[] }
+  | { tag: 'EqPredicate'; lhs: Type; rhs: Term }
+  | {
+      tag: 'BoundPredicate'
+      type: Type
+      bounds: GenericBound[]
+      generic_params: GenericParamDef[] // where for<'a> &'a T: Iterator - `for<...>` part in HRTBs
+    }
 
 // #[serde(rename_all = "snake_case")]
-export type GenericBound = GBTraitBound | GBOutlives
+export type GenericBound =
+  | { tag: 'Outlives'; val: string }
+  | {
+      tag: 'TraitBound'
+      trait: Type
+      generic_params: GenericParamDef[] // where F: for<'a, 'b> Fn(&'a u8, &'b u8) - `for<...>` part in HRTBs
+      modifier: 'none' | 'maybe' | 'maybe_const'
+    }
 
 // #[serde(rename_all = "snake_case")]
 export type Term =
@@ -393,8 +359,7 @@ export type DynTrait = {
 export type FunctionPtr = {
   tag: 'FunctionPtr'
   decl: FnDecl
-  // for<'c> fn(val: &'c i32) -> i32 - `for<...>` part in HRTBs
-  generic_params: GenericParamDef[]
+  generic_params: GenericParamDef[] // for<'c> fn(val: &'c i32) -> i32 - `for<...>` part in HRTBs
   header: Header
 }
 
@@ -428,11 +393,4 @@ export type FnDecl = {
   inputs: [string, Type][]
   output?: Type
   c_variadic: boolean
-}
-
-// #[serde(rename_all = "snake_case")]
-export enum MacroKind {
-  Bang, // bang macro: foo!()
-  Attr, // attribute macro: #[foo]
-  Derive, // derive macro: #[derive(Eq, Clone)]
 }
